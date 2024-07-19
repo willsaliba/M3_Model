@@ -15,3 +15,7 @@ see MPA's post: https://discuss.huggingface.co/t/runtimeerror-placeholder-storag
 
 -> CPU (quick solution but slow training), just add following line to training_args
 no_cuda=True,
+
+---Max Possible Tokens Per Brick---
+1 col <> - x x - y y -  z  z  <> -  qq -  qq -  qq -  qq <> dat
+1  2  3  4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23

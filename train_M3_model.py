@@ -61,7 +61,7 @@ def load_ldr_data(ldr_dir: Path, num_augments_per_file, eval):
 
     return all_lines
 
-def process_file(file_lines, all_lines, num_augments_per_file):
+def process_file(file_lines, all_lines, num_augments_per_file, bricks_per_window=80):
     """
     Cleans up LDR by:
     -removing metadata/comments
@@ -105,11 +105,21 @@ def process_file(file_lines, all_lines, num_augments_per_file):
 
         #shuffling the brick lines
         random.shuffle(processed_file_lines)
+        
+        for i in range(len(processed_file_lines)):
+            curr_window = []
+            #if more then bricks_per_window bricks left get 100 brick window
+            if i + bricks_per_window < len(processed_file_lines): 
+                curr_window = processed_file_lines[i:i+bricks_per_window] 
+            #if less then bricks_per_window bricks left get remaining and add EOS token
+            else: 
+                curr_window = processed_file_lines[i:]
+                curr_window.append(" <|EOS|>")
 
-        #adding processed file to all file lines with EOS token
-        all_lines.append("\n".join(processed_file_lines) + " <|EOS|>")
-
-def load_tokenizer(vocab_size, max_context_window, train_lines, save_path):
+            #add curr window to all lines for training data
+            all_lines.append("\n".join(curr_window))
+        
+def load_tokenizer(vocab_size, train_lines, save_path, max_context_window=2048):
     """
     Initialises, Trains, Saves and Returns Tokenizer
     """
@@ -241,29 +251,28 @@ def load_model_with_timer(config):
 
 def theMain(
     #high level
-    model_config: str = "GPT_NEO", #OPTIONS: GPT_NEO (1.3b), GPT_J (6b), GPT-2 (124m)
+    model_config: str = "GPT_2", #OPTIONS: GPT_NEO (1.3b), GPT_J (6b), GPT_2 (124m)
     vlads_device: bool = False,
     num_augments_per_file: int = 1, 
     #paths
-    train_data_path: Path = Path("omr8"),
+    train_data_path: Path = Path("split_data/nature"),
     save_tokenizer_path: Path = Path("trained_tokenizer"),
     save_model_path: Path = Path("trained_model"),
     #tokenizer params
     vocab_size: int = 52000,
     #model params
-    num_train_epochs: int = 10,
+    num_train_epochs: int = 5,
     learning_rate: float = 1e-5,
-    per_device_train_batch_size = 2,
+    per_device_train_batch_size = 1,
     eval_steps: int = 10000,
     logging_steps: int = 1000,
-    max_context_window: int = 2048, #max for all models (GPT2,J,NEO)
 ):
     #load training data (each element = string of whole file)
-    train_lines = load_ldr_data(train_data_path / "train", num_augments_per_file, eval=False)
-    eval_lines = load_ldr_data(train_data_path / "test", num_augments_per_file, eval=True)
+    train_lines = load_ldr_data(train_data_path, num_augments_per_file, eval=False)
+    eval_lines = train_lines[:1000] #this is temp for testing, probs need to divide each data test into train and test
 
     #load & train tokenizer
-    m3_tokenizer = load_tokenizer(vocab_size, max_context_window, train_lines, save_tokenizer_path)
+    m3_tokenizer = load_tokenizer(vocab_size, train_lines, save_tokenizer_path)
 
     #tokenize data & put in tensor format
     print("--- CONVERTING DATA TO TENSORS ---")
@@ -314,3 +323,11 @@ def main():
     except Exception as e: traceback.print_exception(type(e), e, e.__traceback__, limit=0)
 if __name__ == "__main__": typer.run(main)
 
+    ###---CHECKING FOR NUM LINES EXCEEDING MAX WINDOW SIZE---###
+    # count = 0
+    # for i in range(len(train_lines)):
+    #     if i % 1000 == 0: print(f"Processed {i} lines")
+    #     tokens = m3_tokenizer.encode(train_lines[i])
+    #     if len(tokens) > 2048: count += 1
+    # print(f"Number of lines exceeding max context window: {count} / {len(train_lines)}")
+    # return
