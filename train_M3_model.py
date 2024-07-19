@@ -32,7 +32,7 @@ from transformers import (
 os.system('clear')
 os.environ["TOKENIZERS_PARALLELISM"] = "true"
 
-def load_ldr_data(ldr_dir: Path, num_augments_per_file, eval):
+def load_ldr_data(ldr_dir: Path, num_augments_per_file, is_eval_set):
     """
     Loads all LDR files from the ldr_dir and calls process_file() to augement them
     """
@@ -40,9 +40,9 @@ def load_ldr_data(ldr_dir: Path, num_augments_per_file, eval):
     all_lines = []
 
     #setting upper limit for augmenting evaluation dataset
-    if eval: 
+    if is_eval_set: 
         print("\n--- LOADING EVAL DATA ---")
-        num_augments_per_file = min(num_augments_per_file, 10)
+        num_augments_per_file = min(num_augments_per_file, 1)
     else: print("--- LOADING TRAINING DATA ---")
 
     #iterating through files and augmenting
@@ -51,22 +51,27 @@ def load_ldr_data(ldr_dir: Path, num_augments_per_file, eval):
         if len(all_lines) != 0 and len(all_lines) % 10000 == 0: 
             print(f"Processed {len(all_lines)} files,   latest file: {src_file.name}")
         
+        #determing class label
+        label_token = "<|ANY|>"
+        if 'creature' in src_file.name: label_token = "<|CR|>"
+        elif 'building' in src_file.name: label_token = "<|BU|>"
+        elif 'nature' in src_file.name: label_token = "<|NA|>"
+        elif 'vehicle' in src_file.name: label_token = "<|VE|>"
+        
         #augmenting & appending file
         with src_file.open('r') as file:
             file_lines = file.readlines()
-            process_file(file_lines, all_lines, num_augments_per_file)
+            process_file(file_lines, all_lines, num_augments_per_file, label_token)
 
-    if eval: print(f"Total Eval Files: {len(all_lines)}")
-    else: print(f"Total Eval Files: {len(all_lines)}")
-
+    print(f"Total Files: {len(all_lines)}")
     return all_lines
 
-def process_file(file_lines, all_lines, num_augments_per_file, bricks_per_window=80):
+def process_file(file_lines, all_lines, num_augments_per_file, label_token, bricks_per_window=80):
     """
     Cleans up LDR by:
     -removing metadata/comments
     -rounds floats to 3 decimal places
-    -adds EOS token
+    -adds EOS token and label token
     Creates multiple versions of a file:
     -shuffles brick lines each time
     -adds translation for entire assembly each time
@@ -115,6 +120,8 @@ def process_file(file_lines, all_lines, num_augments_per_file, bricks_per_window
             else: 
                 curr_window = processed_file_lines[i:]
                 curr_window.append(" <|EOS|>")
+            #if first window of sample, add the class label
+            if i == 0: curr_window.insert(0, label_token)
 
             #add curr window to all lines for training data
             all_lines.append("\n".join(curr_window))
@@ -123,8 +130,6 @@ def load_tokenizer(vocab_size, train_lines, save_path, max_context_window=2048):
     """
     Initialises, Trains, Saves and Returns Tokenizer
     """
-
-    #archietecture
     m3 = Tokenizer(BPE(unk_token="<|UNK|>")) 
 
     #normalisation
@@ -149,6 +154,7 @@ def load_tokenizer(vocab_size, train_lines, save_path, max_context_window=2048):
         special_tokens = [
             "<|UNK|>", "<|EOS|>", "<|PAD|>", #unk, end of sequence, padding
             "<|COL|>", "<|POS|>", "<|ORI|>", "<|SHP|>", #colour, position, orientation, shape
+            "<|CR|>", "<|BU|>", "<|NA|>", "<|VE|>", #creature, building, nature, vehicle
         ] 
     )
     m3.train_from_iterator(train_lines, m3_trainer)
@@ -255,7 +261,7 @@ def theMain(
     vlads_device: bool = False,
     num_augments_per_file: int = 1, 
     #paths
-    train_data_path: Path = Path("split_data/nature"),
+    train_data_path: Path = Path("data"),
     save_tokenizer_path: Path = Path("trained_tokenizer"),
     save_model_path: Path = Path("trained_model"),
     #tokenizer params
@@ -268,8 +274,8 @@ def theMain(
     logging_steps: int = 1000,
 ):
     #load training data (each element = string of whole file)
-    train_lines = load_ldr_data(train_data_path, num_augments_per_file, eval=False)
-    eval_lines = train_lines[:1000] #this is temp for testing, probs need to divide each data test into train and test
+    train_lines = load_ldr_data(train_data_path / 'train', num_augments_per_file, is_eval_set=False)
+    eval_lines = load_ldr_data(train_data_path / 'test', num_augments_per_file, is_eval_set=True)
 
     #load & train tokenizer
     m3_tokenizer = load_tokenizer(vocab_size, train_lines, save_tokenizer_path)
@@ -323,11 +329,20 @@ def main():
     except Exception as e: traceback.print_exception(type(e), e, e.__traceback__, limit=0)
 if __name__ == "__main__": typer.run(main)
 
-    ###---CHECKING FOR NUM LINES EXCEEDING MAX WINDOW SIZE---###
-    # count = 0
-    # for i in range(len(train_lines)):
-    #     if i % 1000 == 0: print(f"Processed {i} lines")
-    #     tokens = m3_tokenizer.encode(train_lines[i])
-    #     if len(tokens) > 2048: count += 1
-    # print(f"Number of lines exceeding max context window: {count} / {len(train_lines)}")
-    # return
+###---CHECKING FOR NUM LINES EXCEEDING MAX WINDOW SIZE---###
+# count = 0
+# for i in range(len(train_lines)):
+#     if i % 1000 == 0: print(f"Processed {i} lines")
+#     tokens = m3_tokenizer.encode(train_lines[i])
+#     if len(tokens) > 2048: count += 1
+# print(f"Number of lines exceeding max context window: {count} / {len(train_lines)}")
+# return
+
+###---INSPECTING TOKENS---###
+# encoded_output = m3_tokenizer.encode(train_lines[0])
+# str_tokens = [m3_tokenizer.decode(tok) for tok in encoded_output]
+# for tok in str_tokens:
+#     if ".dat" not in tok: print(tok, '|', end=" ")
+#     # if ".dat" not in tok: print(tok, end=" ")
+#     else: print(tok, end="\n")
+# return
