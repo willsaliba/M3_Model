@@ -6,6 +6,7 @@ import torch
 from torch.utils.data import Dataset
 import time
 import threading
+from scipy.spatial.transform import Rotation
 
 #tokenizer imports
 from tokenizers import Tokenizer, pre_tokenizers, Regex, normalizers, decoders
@@ -80,18 +81,27 @@ def process_file(file_lines, all_lines, num_augments_per_file):
         for line in file_lines:
             entries = line.split()
             if entries[0] != '1': continue
-            #process translation (inds: 2-4)
-            for j in range(2,5):
+            #process translation for x, y, z and rounding to 3 decimal places (inds: 2-4)
+            for j in range(2, 5):
                 coord = float(entries[j]) + translation[j-2]
-                entries[j] = str(coord)
-            #convert floats to 3 decimal places unless all 0 (inds: 2-13)
-            for j in range(2, 14):
-                value = float(entries[j])
-                if value == int(value): entries[j] = str(int(value))
-                else: entries[j] = f"{value:.3f}"
-            
-            #adding processed line to curr file lines
-            processed_file_lines.append(" ".join(entries))
+                if coord == int(coord): entries[j] = str(int(coord))
+                else: entries[j] = f"{coord:.3f}"
+            #converting rotation matrix to quaternions
+            rot_matrix = [
+                [float(entries[5]), float(entries[6]), float(entries[7])],
+                [float(entries[8]), float(entries[9]), float(entries[10])],
+                [float(entries[11]), float(entries[12]), float(entries[13])]
+            ]
+            rotation = Rotation.from_matrix(rot_matrix)
+            quaternions = rotation.as_quat().tolist()
+            for j in range(len(quaternions)):
+                quat = float(quaternions[j])
+                if quat == int(quat): quaternions[j] = str(int(quat))
+                else: quaternions[j] = f"{quat:.3f}"
+
+            #creating and adding processed line to curr file lines
+            final_entries = entries[0:5] + quaternions + entries[14:]
+            processed_file_lines.append(" ".join(final_entries))
 
         #shuffling the brick lines
         random.shuffle(processed_file_lines)
@@ -109,10 +119,10 @@ def load_tokenizer(vocab_size, max_context_window, train_lines, save_path):
 
     #normalisation
     m3.normalizer = normalizers.Sequence([
-        Replace(Regex(r'^.*?\K\s'), " <|COL|> "), 
-        Replace(Regex(r'^(?:[^\s]*\s){2}[^\s]*\K\s'), " <|POS|> "),
-        Replace(Regex(r'^(?:[^\s]*\s){6}[^\s]*\K\s'), " <|ORI|> "),
-        Replace(Regex(r'^(?:[^\s]*\s){16}[^\s]*\K\s'), " <|SHP|> "), 
+        # Replace(Regex(r'^.*?\K\s'), " <|COL|> "), #removing colour flag to reduce token sequence length
+        Replace(Regex(r'^(?:[^\s]*\s){1}[^\s]*\K\s'), " <|POS|> "),
+        Replace(Regex(r'^(?:[^\s]*\s){5}[^\s]*\K\s'), " <|ORI|> "),
+        Replace(Regex(r'^(?:[^\s]*\s){10}[^\s]*\K\s'), " <|SHP|> "), 
     ])
 
     #pretokenisation (whitespace, -, decimal places)
@@ -128,7 +138,7 @@ def load_tokenizer(vocab_size, max_context_window, train_lines, save_path):
         show_progress = True,
         special_tokens = [
             "<|UNK|>", "<|EOS|>", "<|PAD|>", #unk, end of sequence, padding
-            "<|COL|>", "<|POS|>", "<|ORI|>", "<|SHP|>", #column, position, orientation, shape
+            "<|COL|>", "<|POS|>", "<|ORI|>", "<|SHP|>", #colour, position, orientation, shape
         ] 
     )
     m3.train_from_iterator(train_lines, m3_trainer)
@@ -158,9 +168,11 @@ def output_to_LDR(tokenizer, encoded_output, printTokens=False):
     #printing the tokens in string format
     if printTokens:
         print(f"TOKENS:")
+        # encoded_output = m3_tokenizer.encode(train_lines[2])
         str_tokens = [tokenizer.decode(tok) for tok in encoded_output]
         for tok in str_tokens:
             if ".dat" not in tok: print(tok, '|', end=" ")
+            # if ".dat" not in tok: print(tok, end=" ")
             else: print(tok, end="\n")
         print("\n")
 
@@ -231,7 +243,7 @@ def theMain(
     #high level
     model_config: str = "GPT_NEO", #OPTIONS: GPT_NEO (1.3b), GPT_J (6b), GPT-2 (124m)
     vlads_device: bool = False,
-    num_augments_per_file: int = 10, 
+    num_augments_per_file: int = 1, 
     #paths
     train_data_path: Path = Path("omr8"),
     save_tokenizer_path: Path = Path("trained_tokenizer"),
@@ -244,7 +256,7 @@ def theMain(
     per_device_train_batch_size = 2,
     eval_steps: int = 10000,
     logging_steps: int = 1000,
-    max_context_window: int = 2048,
+    max_context_window: int = 2048, #max for all models (GPT2,J,NEO)
 ):
     #load training data (each element = string of whole file)
     train_lines = load_ldr_data(train_data_path / "train", num_augments_per_file, eval=False)
