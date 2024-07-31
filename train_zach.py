@@ -278,7 +278,7 @@ def theMain(
     #model params
     num_train_epochs: int = 10,
     learning_rate: float = 5e-5,
-    per_device_train_batch_size = 4,
+    per_device_train_batch_size = 1,
     eval_steps: int = 1000,
     logging_steps: int = 1000,
 ):

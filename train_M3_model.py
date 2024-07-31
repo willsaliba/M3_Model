@@ -274,7 +274,7 @@ def theMain(
     logging_steps: int = 1000,
 ):
     #load training data (each element = string of whole file)
-    train_lines = load_ldr_data(train_data_path / 'train', num_augments_per_file, is_eval_set=False)
+    train_lines = load_ldr_data(train_data_path / 'test', num_augments_per_file, is_eval_set=False)
     eval_lines = load_ldr_data(train_data_path / 'test', num_augments_per_file, is_eval_set=True)
 
     #load & train tokenizer
