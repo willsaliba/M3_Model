@@ -4,16 +4,15 @@ import random
 from pathlib import Path
 import torch
 from torch.utils.data import Dataset
-import time
-import threading
 from scipy.spatial.transform import Rotation
 
 #tokenizer imports
 from tokenizers import Tokenizer, pre_tokenizers, Regex, normalizers, decoders
-from tokenizers.models import BPE, WordLevel
+from tokenizers.models import BPE
 from tokenizers.normalizers import Replace
-from tokenizers.pre_tokenizers import WhitespaceSplit, Split
-from tokenizers.trainers import BpeTrainer, WordLevelTrainer
+from tokenizers.pre_tokenizers import Split
+from tokenizers.decoders import ByteLevel
+from tokenizers.trainers import BpeTrainer
 
 #transformer imports
 from transformers import (
@@ -23,15 +22,25 @@ from transformers import (
     TrainingArguments,
     Trainer,
     GPT2Config, 
-    GPTNeoConfig,
-    GPTJConfig, 
-    GPTNeoModel
+    # GPTNeoConfig, 
 )
-import torch
-torch.cuda.empty_cache()
+
 #environemnt variables
 os.system('clear')
 os.environ["TOKENIZERS_PARALLELISM"] = "true"
+
+def printTokenStream(text, m3):
+    #untouched text
+    print("\n---TRAIN TEXT UNTOUCHED---\n", text, end="\n--END TRAIN TEXT UNTOUCHED--\n\n")
+    
+    #tokenized text
+    print("---M3 TOKENS for TRAIN TEXT---")
+    input_ids = m3.encode(text, add_special_tokens=True)
+    tokens = m3.convert_ids_to_tokens(input_ids)
+    for tok in tokens:
+        if tok == '\n': print(r"\n")
+        else: print(tok, '| ', end="")
+    print("\n")
 
 def load_ldr_data(ldr_dir: Path, num_augments_per_file, is_eval_set):
     """
@@ -47,7 +56,7 @@ def load_ldr_data(ldr_dir: Path, num_augments_per_file, is_eval_set):
     else: print("--- LOADING TRAINING DATA ---")
 
     #iterating through files and augmenting
-    for src_file in src_files[:10]:
+    for src_file in src_files:
         #progress update
         if len(all_lines) != 0 and len(all_lines) % 10000 == 0: 
             print(f"Processed {len(all_lines)} files,   latest file: {src_file.name}")
@@ -107,7 +116,8 @@ def process_file(file_lines, all_lines, num_augments_per_file, label_token, bric
 
             #creating and adding processed line to curr file lines
             final_entries = entries[0:5] + quaternions + entries[14:]
-            processed_file_lines.append(" ".join(final_entries))
+            final_processed_line = " ".join(final_entries) #+ " \n"
+            processed_file_lines.append(final_processed_line)
 
         #shuffling the brick lines
         random.shuffle(processed_file_lines)
@@ -125,7 +135,7 @@ def process_file(file_lines, all_lines, num_augments_per_file, label_token, bric
             if i == 0: curr_window.insert(0, label_token)
 
             #add curr window to all lines for training data
-            all_lines.append("\n".join(curr_window))
+            all_lines.append(" \n ".join(curr_window))
         
 def load_tokenizer(vocab_size, train_lines, save_path, max_context_window=2048):
     """
@@ -135,17 +145,24 @@ def load_tokenizer(vocab_size, train_lines, save_path, max_context_window=2048):
 
     #normalisation
     m3.normalizer = normalizers.Sequence([
-        # Replace(Regex(r'^.*?\K\s'), " <|COL|> "), #removing colour flag to reduce token sequence length
-        Replace(Regex(r'^(?:[^\s]*\s){1}[^\s]*\K\s'), " <|POS|> "),
-        Replace(Regex(r'^(?:[^\s]*\s){5}[^\s]*\K\s'), " <|ORI|> "),
-        Replace(Regex(r'^(?:[^\s]*\s){10}[^\s]*\K\s'), " <|SHP|> "), 
+        # Replace(Regex(r'^.*?\K\s'), " <|COL|> "), 
+        # Replace(Regex(r'^(?:[^\s]*\s){1}[^\s]*\K\s'), " <|POS|> "),
+        # Replace(Regex(r'^(?:[^\s]*\s){5}[^\s]*\K\s'), " <|ORI|> "),
+        # Replace(Regex(r'^(?:[^\s]*\s){10}[^\s]*\K\s'), " <|SHP|> "), 
     ])
 
-    #pretokenisation (whitespace, -, decimal places)
+    #pre-tokenization (spaces, -, decimal places)
     m3.pre_tokenizer = pre_tokenizers.Sequence([
-        WhitespaceSplit(),
+        Split(pattern=Regex(r" "), behavior="removed"),  # Splits on spaces but preserves newlines
         Split(pattern=Regex(r"-|\.\d{3}"), behavior="isolated"),
     ])
+    m3.decoder = ByteLevel()
+
+    # print("PRETOKENIZATION B4 TRAINING")
+    # pre_tokes = m3.pre_tokenizer.pre_tokenize_str(train_lines[0])
+    # for tok in pre_tokes:
+    #     if tok[0] == '\n': print(r"\n")
+    #     else: print(tok[0], '|', end="")
     
     #training tokenizer
     print("\n--- TRAINING TOKENIZER ---")
@@ -173,49 +190,6 @@ def load_tokenizer(vocab_size, train_lines, save_path, max_context_window=2048):
     M3.save_pretrained(save_path)
     return M3
 
-def output_to_LDR(tokenizer, encoded_output, printTokens=False):
-    """
-    This function takes encoded output (raw tokens) and converts them to valid LDR by:
-    -decoding tokens
-    -removing special tokens
-    -removing space character between '-' and the following digit
-    -adding new lines after each brick line (.dat)
-    """
-
-    #printing the tokens in string format
-    if printTokens:
-        print(f"TOKENS:")
-        # encoded_output = m3_tokenizer.encode(train_lines[2])
-        str_tokens = [tokenizer.decode(tok) for tok in encoded_output]
-        for tok in str_tokens:
-            if ".dat" not in tok: print(tok, '|', end=" ")
-            # if ".dat" not in tok: print(tok, end=" ")
-            else: print(tok, end="\n")
-        print("\n")
-
-    #decoding & post-processing tokens
-    string_decoding = tokenizer.decode(encoded_output)
-    processed, i = "", 0    
-    while i < len(string_decoding):
-        ltr = string_decoding[i]
-        #-
-        if ltr == '-':
-            processed += '-'
-            i += 2
-        #.dat
-        elif ltr == 't':
-            processed += 't\n'
-            i += 2
-        #special tok
-        elif ltr == '<':
-            i += 8
-        # normal
-        else:
-            processed += ltr
-            i += 1
-
-    return processed
-
 class LDRTextDataset(Dataset):
     def __init__(self, lines, tokenizer):
         self.examples = tokenizer.batch_encode_plus(lines).input_ids
@@ -226,40 +200,9 @@ class LDRTextDataset(Dataset):
     def __getitem__(self, i):
         return torch.tensor(self.examples[i])
 
-def load_model_with_timer(config):
-    """
-    This function is a super complicated way of loading a model with a timer
-    """
-    if config == "GPT_NEO": 
-        print("\n--- LOADING GPT-NEO ~16s ---")
-        Config = GPTNeoConfig()
-    elif config == "GPT_J": 
-        print("\n--- LOADING GPT-J ~72s ---")
-        Config = GPTJConfig()
-    else: 
-        print("\n--- LOADING GPT2 ~3s ---")
-        Config = GPT2Config()
-    def display_stopwatch(start_time):
-        while not stop_event.is_set():
-            elapsed_time = time.time() - start_time
-            print(f"Elapsed Time: {elapsed_time:.2f} seconds", end="\r")
-            time.sleep(0.1)
-    start_time, stop_event = time.time(), threading.Event()
-    thread = threading.Thread(target=display_stopwatch, args=(start_time,))
-    thread.start()
-    #-------ACTUALLY LOADING THE MODEL START
-    model = AutoModelForCausalLM.from_config(Config)
-    #-------ACTUALLY LOADING THE MODEL END
-    stop_event.set()
-    thread.join()
-    print(f"Total Elapsed Time: {(time.time() - start_time):.2f} seconds")
-    print(f"Completed. Num trainable parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad)}")
-    return model
-
 def theMain(
     #high level
-    model_config: str = "GPT_2", #OPTIONS: GPT_NEO (1.3b), GPT_J (6b), GPT_2 (124m)
-    vlads_device: bool = True,
+    vlads_device: bool = False,
     num_augments_per_file: int = 1, 
     #paths
     train_data_path: Path = Path("data"),
@@ -271,15 +214,16 @@ def theMain(
     num_train_epochs: int = 5,
     learning_rate: float = 1e-5,
     per_device_train_batch_size = 1,
-    eval_steps: int = 10000,
+    eval_steps: int = 1000,
     logging_steps: int = 1000,
 ):
     #load training data (each element = string of whole file)
-    train_lines = load_ldr_data(train_data_path / 'train', num_augments_per_file, is_eval_set=False)
+    train_lines = load_ldr_data(train_data_path / 'test', num_augments_per_file, is_eval_set=False)
     eval_lines = load_ldr_data(train_data_path / 'test', num_augments_per_file, is_eval_set=True)
 
     #load & train tokenizer
     m3_tokenizer = load_tokenizer(vocab_size, train_lines, save_tokenizer_path)
+    printTokenStream(train_lines[0], m3_tokenizer)
 
     #tokenize data & put in tensor format
     print("--- CONVERTING DATA TO TENSORS ---")
@@ -288,9 +232,10 @@ def theMain(
     eval_dataset = LDRTextDataset(eval_lines, m3_tokenizer)
 
     #loading model and data collator
-    model = load_model_with_timer(model_config)
+    print("\n--- LOADING GPT2 ---")
+    model = AutoModelForCausalLM.from_config(GPT2Config())
     data_collator = DataCollatorForLanguageModeling(tokenizer=m3_tokenizer, mlm=False)
-
+    
     #setting training variables and training model
     print("\n--- TRAINING TRANSFORMER ---")
     training_args = TrainingArguments(
@@ -311,7 +256,6 @@ def theMain(
         load_best_model_at_end=True,
         overwrite_output_dir=True,
         metric_for_best_model="loss",        
-	gradient_accumulation_steps=9
     )
     trainer = Trainer(
         model=model,
@@ -321,7 +265,7 @@ def theMain(
         eval_dataset=eval_dataset,
     )
     trainer.train()
-    model.save_pretrained(Path(save_model_path, model_config))
+    model.save_pretrained(Path(save_model_path, "M3_GPT2"))
     print("\n--- TRAINED MODEL SAVED ---")
 
 #DEAR ZACH: this is my weird way of running the main function bc I was sick of the super long terminal error messages that would cut off
