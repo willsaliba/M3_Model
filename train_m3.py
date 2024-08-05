@@ -31,16 +31,17 @@ os.environ["TOKENIZERS_PARALLELISM"] = "true"
 
 def printTokenStream(text, m3):
     #untouched text
-    print("\n---TRAIN TEXT UNTOUCHED---\n", text, end="\n--END TRAIN TEXT UNTOUCHED--\n\n")
+    # print("\n---TRAIN TEXT UNTOUCHED---\n", text, end="\n--END TRAIN TEXT UNTOUCHED--\n\n")
+    print("---Sample Train Line and Tokens---\n")
+    print(text, "\n")
     
     #tokenized text
-    print("---M3 TOKENS for TRAIN TEXT---")
     input_ids = m3.encode(text, add_special_tokens=True)
     tokens = m3.convert_ids_to_tokens(input_ids)
     for tok in tokens:
-        if tok == '\n': print(r"\n")
-        else: print(tok, '| ', end="")
-    print("\n")
+        if tok == '\n': print(r"'\n'" )
+        else: print(f"'{tok}' ", end="")
+    print('\n')
 
 def load_ldr_data(ldr_dir: Path, num_augments_per_file, is_eval_set):
     """
@@ -57,10 +58,6 @@ def load_ldr_data(ldr_dir: Path, num_augments_per_file, is_eval_set):
 
     #iterating through files and augmenting
     for src_file in src_files:
-        #progress update
-        if len(all_lines) != 0 and len(all_lines) % 10000 == 0: 
-            print(f"Processed {len(all_lines)} files,   latest file: {src_file.name}")
-        
         #determing class label
         label_token = "<|ANY|>"
         if 'creature' in src_file.name: label_token = "<|CR|>"
@@ -76,7 +73,7 @@ def load_ldr_data(ldr_dir: Path, num_augments_per_file, is_eval_set):
     print(f"Total Files: {len(all_lines)}")
     return all_lines
 
-def process_file(file_lines, all_lines, num_augments_per_file, label_token, bricks_per_window=80):
+def process_file(file_lines, all_lines, num_augments_per_file, label_token, bricks_per_window=50):
     """
     Cleans up LDR by:
     -removing metadata/comments
@@ -95,12 +92,12 @@ def process_file(file_lines, all_lines, num_augments_per_file, label_token, bric
         
         for line in file_lines:
             entries = line.split()
+            if len(entries) == 0: continue
             if entries[0] != '1': continue
             #process translation for x, y, z and rounding to 3 decimal places (inds: 2-4)
             for j in range(2, 5):
                 coord = float(entries[j]) + translation[j-2]
-                if coord == int(coord): entries[j] = str(int(coord))
-                else: entries[j] = f"{coord:.3f}"
+                entries[j] = f"{coord:.3f}"
             #converting rotation matrix to quaternions
             rot_matrix = [
                 [float(entries[5]), float(entries[6]), float(entries[7])],
@@ -111,17 +108,17 @@ def process_file(file_lines, all_lines, num_augments_per_file, label_token, bric
             quaternions = rotation.as_quat().tolist()
             for j in range(len(quaternions)):
                 quat = float(quaternions[j])
-                if quat == int(quat): quaternions[j] = str(int(quat))
-                else: quaternions[j] = f"{quat:.3f}"
+                quaternions[j] = f"{quat:.3f}"
 
             #creating and adding processed line to curr file lines
             final_entries = entries[0:5] + quaternions + entries[14:]
-            final_processed_line = " ".join(final_entries) #+ " \n"
+            final_processed_line = " ".join(final_entries) + " \n"
             processed_file_lines.append(final_processed_line)
 
         #shuffling the brick lines
-        random.shuffle(processed_file_lines)
+        # random.shuffle(processed_file_lines)
         
+        #creating training windows
         for i in range(len(processed_file_lines)):
             curr_window = []
             #if more then bricks_per_window bricks left get 100 brick window
@@ -135,8 +132,8 @@ def process_file(file_lines, all_lines, num_augments_per_file, label_token, bric
             if i == 0: curr_window.insert(0, label_token)
 
             #add curr window to all lines for training data
-            all_lines.append(" \n ".join(curr_window))
-        
+            all_lines.append(" ".join(curr_window))
+             
 def load_tokenizer(vocab_size, train_lines, save_path, max_context_window=2048):
     """
     Initialises, Trains, Saves and Returns Tokenizer
@@ -146,8 +143,8 @@ def load_tokenizer(vocab_size, train_lines, save_path, max_context_window=2048):
     #normalisation
     m3.normalizer = normalizers.Sequence([
         # Replace(Regex(r'^.*?\K\s'), " <|COL|> "), 
-        # Replace(Regex(r'^(?:[^\s]*\s){1}[^\s]*\K\s'), " <|POS|> "),
-        # Replace(Regex(r'^(?:[^\s]*\s){5}[^\s]*\K\s'), " <|ORI|> "),
+        # Replace(Regex(r'^(?:[^\s]*\s){1}[^\s]*\K\s'), " <|POS|> "), 
+        # Replace(Regex(r'^(?:[^\s]*\s){5}[^\s]*\K\s'), " <|ORI|> "), 
         # Replace(Regex(r'^(?:[^\s]*\s){10}[^\s]*\K\s'), " <|SHP|> "), 
     ])
 
@@ -172,7 +169,7 @@ def load_tokenizer(vocab_size, train_lines, save_path, max_context_window=2048):
         special_tokens = [
             "<|UNK|>", "<|EOS|>", "<|PAD|>", #unk, end of sequence, padding
             "<|COL|>", "<|POS|>", "<|ORI|>", "<|SHP|>", #colour, position, orientation, shape
-            "<|CR|>", "<|BU|>", "<|NA|>", "<|VE|>", #creature, building, nature, vehicle
+            "<|ANY|>", "<|CR|>", "<|BU|>", "<|NA|>", "<|VE|>", #creature, building, nature, vehicle
         ] 
     )
     m3.train_from_iterator(train_lines, m3_trainer)
@@ -218,7 +215,7 @@ def theMain(
     logging_steps: int = 1000,
 ):
     #load training data (each element = string of whole file)
-    train_lines = load_ldr_data(train_data_path / 'test', num_augments_per_file, is_eval_set=False)
+    train_lines = load_ldr_data(train_data_path / 'train', num_augments_per_file, is_eval_set=False)
     eval_lines = load_ldr_data(train_data_path / 'test', num_augments_per_file, is_eval_set=True)
 
     #load & train tokenizer
@@ -252,7 +249,7 @@ def theMain(
         save_steps=10000,
         save_total_limit=1,
         push_to_hub=False,
-        evaluation_strategy="steps",
+        eval_strategy="steps",
         load_best_model_at_end=True,
         overwrite_output_dir=True,
         metric_for_best_model="loss",        
