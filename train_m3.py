@@ -7,7 +7,7 @@ from torch.utils.data import Dataset
 from scipy.spatial.transform import Rotation
 
 #tokenizer imports
-from tokenizers import Tokenizer, pre_tokenizers, Regex, normalizers, decoders
+from tokenizers import Tokenizer, pre_tokenizers, Regex #normalizers, decoders
 from tokenizers.models import BPE
 from tokenizers.normalizers import Replace
 from tokenizers.pre_tokenizers import Split
@@ -52,9 +52,9 @@ def load_ldr_data(ldr_dir: Path, num_augments_per_file, is_eval_set):
 
     #setting upper limit for augmenting evaluation dataset
     if is_eval_set: 
-        print("\n--- LOADING EVAL DATA ---")
+        print("\n--- LOADING EVAL LINES ---")
         num_augments_per_file = min(num_augments_per_file, 1)
-    else: print("--- LOADING TRAINING DATA ---")
+    else: print("--- LOADING TRAIN LINES ---")
 
     #iterating through files and augmenting
     for src_file in src_files:
@@ -70,7 +70,7 @@ def load_ldr_data(ldr_dir: Path, num_augments_per_file, is_eval_set):
             file_lines = file.readlines()
             process_file(file_lines, all_lines, num_augments_per_file, label_token)
 
-    print(f"Total Train/Eval Lines: {len(all_lines)}")
+    print(f"Total Lines: {len(all_lines)}")
     return all_lines
 
 def process_file(file_lines, all_lines, num_augments_per_file, label_token, bricks_per_window=75):
@@ -142,12 +142,12 @@ def load_tokenizer(vocab_size, train_lines, save_path, max_context_window=2048):
     m3 = Tokenizer(BPE(unk_token="<|UNK|>")) 
 
     #normalisation
-    m3.normalizer = normalizers.Sequence([
-        # Replace(Regex(r'^.*?\K\s'), " <|COL|> "), 
-        # Replace(Regex(r'^(?:[^\s]*\s){1}[^\s]*\K\s'), " <|POS|> "), 
-        # Replace(Regex(r'^(?:[^\s]*\s){5}[^\s]*\K\s'), " <|ORI|> "), 
-        # Replace(Regex(r'^(?:[^\s]*\s){10}[^\s]*\K\s'), " <|SHP|> "), 
-    ])
+    # m3.normalizer = normalizers.Sequence([
+    #     Replace(Regex(r'^.*?\K\s'), " <|COL|> "), 
+    #     Replace(Regex(r'^(?:[^\s]*\s){1}[^\s]*\K\s'), " <|POS|> "), 
+    #     Replace(Regex(r'^(?:[^\s]*\s){5}[^\s]*\K\s'), " <|ORI|> "), 
+    #     Replace(Regex(r'^(?:[^\s]*\s){10}[^\s]*\K\s'), " <|SHP|> "), 
+    # ])
 
     #pre-tokenization (spaces, -, decimal places)
     m3.pre_tokenizer = pre_tokenizers.Sequence([
@@ -155,12 +155,6 @@ def load_tokenizer(vocab_size, train_lines, save_path, max_context_window=2048):
         Split(pattern=Regex(r"-|\.\d{3}"), behavior="isolated"),
     ])
     m3.decoder = ByteLevel()
-
-    # print("PRETOKENIZATION B4 TRAINING")
-    # pre_tokes = m3.pre_tokenizer.pre_tokenize_str(train_lines[0])
-    # for tok in pre_tokes:
-    #     if tok[0] == '\n': print(r"\n")
-    #     else: print(tok[0], '|', end="")
     
     #training tokenizer
     print("\n--- TRAINING TOKENIZER ---")
@@ -241,15 +235,16 @@ def theMain(
 
         #learning variables
         num_train_epochs=10,
-        learning_rate=2.5e-6, # original divided 4, since data is 9 times larger
+        learning_rate=5e-6, # original divided 2, data is 9 times larger
         eval_steps=1000,    
-        logging_steps=1000,
+        
 
-        #updates to weights occer every trainBatchSize * gradiatentAccumSteps = 4*3 = update every 12 samples
-        per_device_train_batch_size=4, #num samples simultaneously processed (in 1 batch)
-        gradient_accumulation_steps=3, #num batches before updating weights
+        #updates to weights occer every trainBatchSize * gradiatentAccumSteps = every 10 samples
+        per_device_train_batch_size=2, #num samples simultaneously processed (in 1 batch)
+        gradient_accumulation_steps=5, #num batches before updating weights
         
         #non-variable args
+        logging_steps=1000,
         save_steps=10000,
         save_total_limit=1,
         push_to_hub=False,
