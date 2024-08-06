@@ -70,7 +70,7 @@ def load_ldr_data(ldr_dir: Path, num_augments_per_file, is_eval_set):
             file_lines = file.readlines()
             process_file(file_lines, all_lines, num_augments_per_file, label_token)
 
-    print(f"Total Train/Eval Lines: {len(all_lines)}")
+    print(f"Total Files: {len(all_lines)}")
     return all_lines
 
 def process_file(file_lines, all_lines, num_augments_per_file, label_token, bricks_per_window=75):
@@ -200,66 +200,60 @@ class LDRTextDataset(Dataset):
 
 def theMain(
     #high level
-    vlads_device: bool = True,
+    vlads_device: bool = False,
     num_augments_per_file: int = 1, 
     #paths
     train_data_path: Path = Path("data"),
     save_tokenizer_path: Path = Path("trained_tokenizer"),
     save_model_path: Path = Path("trained_model"),
+    #tokenizer params
+    vocab_size: int = 52000,
+    #model params
+    num_train_epochs: int = 5,
+    learning_rate: float = 1e-5,
+    per_device_train_batch_size = 1,
+    eval_steps: int = 1000,
+    logging_steps: int = 1000,
 ):
     #load training data (each element = string of whole file)
     train_lines = load_ldr_data(train_data_path / 'train', num_augments_per_file, is_eval_set=False)
     eval_lines = load_ldr_data(train_data_path / 'test', num_augments_per_file, is_eval_set=True)
 
     #load & train tokenizer
-    m3_tokenizer = load_tokenizer(int(52000), train_lines, save_tokenizer_path)
+    m3_tokenizer = load_tokenizer(vocab_size, train_lines, save_tokenizer_path)
     printTokenStream(train_lines[0], m3_tokenizer)
 
     #tokenize data & put in tensor format
     print("--- CONVERTING DATA TO TENSORS ---")
     print("Can take a while based on dataset size...")
     train_dataset = LDRTextDataset(train_lines, m3_tokenizer)
-    print("completed training dataset")
     eval_dataset = LDRTextDataset(eval_lines, m3_tokenizer)
-    print("completed evaluation dataset")
 
     #loading model and data collator
-    print("\n--- LOADING GPT2 and Data Collator---")
-    model = AutoModelForCausalLM.from_config(GPT2Config(
-        vocab_size=m3_tokenizer.vocab_size,
-        n_positions=m3_tokenizer.model_max_length,
-    ))
+    print("\n--- LOADING GPT2 ---")
+    model = AutoModelForCausalLM.from_config(GPT2Config())
     data_collator = DataCollatorForLanguageModeling(tokenizer=m3_tokenizer, mlm=False)
-    print("done")
-
+    
     #setting training variables and training model
     print("\n--- TRAINING TRANSFORMER ---")
     training_args = TrainingArguments(
-        #paths
         output_dir=save_model_path,
+        #learning
+        num_train_epochs=num_train_epochs,
+        learning_rate=learning_rate,
+        eval_steps=eval_steps,    
+        logging_steps=logging_steps,
+        per_device_train_batch_size=per_device_train_batch_size,
+        #train location
         fp16=vlads_device,
-
-        #learning variables
-        num_train_epochs=10,
-        learning_rate=2.5e-6, # original divided 4, since data is 9 times larger
-        eval_steps=1000,    
-        logging_steps=1000,
-
-        #updates to weights occer every trainBatchSize * gradiatentAccumSteps = 4*3 = update every 12 samples
-        per_device_train_batch_size=4, #num samples simultaneously processed (in 1 batch)
-        gradient_accumulation_steps=3, #num batches before updating weights
-        
-        #non-variable args
+        #non-variable
         save_steps=10000,
         save_total_limit=1,
         push_to_hub=False,
         eval_strategy="steps",
         load_best_model_at_end=True,
         overwrite_output_dir=True,
-        metric_for_best_model="loss",   
-        weight_decay=0.01,
-        greater_is_better=False,
-        lr_scheduler_type="cosine",     
+        metric_for_best_model="loss",        
     )
     trainer = Trainer(
         model=model,
@@ -269,8 +263,7 @@ def theMain(
         eval_dataset=eval_dataset,
     )
     trainer.train()
-    print("\n--- TRANSFORMER TRAINED ---")
-    model.save_pretrained(Path(save_model_path, "M3_GPT2_v1.1"))
+    model.save_pretrained(Path(save_model_path, "M3_GPT2"))
     print("\n--- TRAINED MODEL SAVED ---")
 
 #DEAR ZACH: this is my weird way of running the main function bc I was sick of the super long terminal error messages that would cut off
@@ -279,3 +272,21 @@ def main():
     try: theMain()
     except Exception as e: traceback.print_exception(type(e), e, e.__traceback__, limit=0)
 if __name__ == "__main__": typer.run(main)
+
+###---CHECKING FOR NUM LINES EXCEEDING MAX WINDOW SIZE---###
+# count = 0
+# for i in range(len(train_lines)):
+#     if i % 1000 == 0: print(f"Processed {i} lines")
+#     tokens = m3_tokenizer.encode(train_lines[i])
+#     if len(tokens) > 2048: count += 1
+# print(f"Number of lines exceeding max context window: {count} / {len(train_lines)}")
+# return
+
+###---INSPECTING TOKENS---###
+# encoded_output = m3_tokenizer.encode(train_lines[0])
+# str_tokens = [m3_tokenizer.decode(tok) for tok in encoded_output]
+# for tok in str_tokens: 
+#     if ".dat" not in tok: print(tok, '|', end=" ")
+#     # if ".dat" not in tok: print(tok, end=" ")
+#     else: print(tok, end="\n")
+# return
