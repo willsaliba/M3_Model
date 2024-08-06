@@ -257,6 +257,7 @@ def theMain(
     )
 
     #saving training args so we can see what we trained with
+    if training_args_file.exists(): training_args_file.unlink()
     training_args_file = save_model_path / "trainingArgs_M3_GPT2_v1-1.txt"
     with open(training_args_file, 'w') as f:
         for arg, value in vars(training_args).items():
