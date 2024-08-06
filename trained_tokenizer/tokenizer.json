@@ -112,10 +112,7 @@
       "special": true
     }
   ],
-  "normalizer": {
-    "type": "Sequence",
-    "normalizers": []
-  },
+  "normalizer": null,
   "pre_tokenizer": {
     "type": "Sequence",
     "pretokenizers": [

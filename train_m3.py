@@ -194,7 +194,7 @@ class LDRTextDataset(Dataset):
 
 def theMain(
     #high level
-    vlads_device: bool = True,
+    vlads_device: bool = False,
     num_augments_per_file: int = 1, 
     #paths
     train_data_path: Path = Path("data"),
@@ -202,7 +202,7 @@ def theMain(
     save_model_path: Path = Path("trained_model"),
 ):
     #load training data (each element = string of whole file)
-    train_lines = load_ldr_data(train_data_path / 'train', num_augments_per_file, is_eval_set=False)
+    train_lines = load_ldr_data(train_data_path / 'test', num_augments_per_file, is_eval_set=False)
     eval_lines = load_ldr_data(train_data_path / 'test', num_augments_per_file, is_eval_set=True)
 
     #load & train tokenizer
@@ -236,8 +236,7 @@ def theMain(
         #learning variables
         num_train_epochs=10,
         learning_rate=5e-6, # original divided 2, data is 9 times larger
-        eval_steps=1000,    
-        
+        eval_steps=1000,    # 1 step = 10 samples, so every 10k samples
 
         #updates to weights occer every trainBatchSize * gradiatentAccumSteps = every 10 samples
         per_device_train_batch_size=2, #num samples simultaneously processed (in 1 batch)
@@ -256,6 +255,13 @@ def theMain(
         greater_is_better=False,
         lr_scheduler_type="cosine",     
     )
+
+    #saving training args so we can see what we trained with
+    training_args_file = save_model_path / "trainingArgs_M3_GPT2_v1-1.txt"
+    with open(training_args_file, 'w') as f:
+        for arg, value in vars(training_args).items():
+            f.write(f"{arg}: {value}\n")
+
     trainer = Trainer(
         model=model,
         args=training_args,
@@ -265,7 +271,7 @@ def theMain(
     )
     trainer.train()
     print("\n--- TRANSFORMER TRAINED ---")
-    model.save_pretrained(Path(save_model_path, "M3_GPT2_v1.1"))
+    model.save_pretrained(Path(save_model_path, "M3_GPT2_v1-1"))
     print("\n--- TRAINED MODEL SAVED ---")
 
 #DEAR ZACH: this is my weird way of running the main function bc I was sick of the super long terminal error messages that would cut off
