@@ -5,6 +5,7 @@ from pathlib import Path
 import torch
 from torch.utils.data import Dataset
 from scipy.spatial.transform import Rotation
+from datetime import datetime
 
 #tokenizer imports
 from tokenizers import Tokenizer, pre_tokenizers, Regex #normalizers, decoders
@@ -194,57 +195,49 @@ class LDRTextDataset(Dataset):
 
 def theMain(
     #high level
-    vlads_device: bool = False,
+    vlads_device: bool = True,
     num_augments_per_file: int = 1, 
     #paths
     train_data_path: Path = Path("data"),
-    save_tokenizer_path: Path = Path("trained_tokenizer"),
     save_model_path: Path = Path("trained_model"),
+    save_tokenizer_path: Path = Path("trained_tokenizer"),
 ):
     #load training data (each element = string of whole file)
-    train_lines = load_ldr_data(train_data_path / 'test', num_augments_per_file, is_eval_set=False)
+    train_lines = load_ldr_data(train_data_path / 'train', num_augments_per_file, is_eval_set=False)
     eval_lines = load_ldr_data(train_data_path / 'test', num_augments_per_file, is_eval_set=True)
 
     #load & train tokenizer
     m3_tokenizer = load_tokenizer(int(52000), train_lines, save_tokenizer_path)
     printTokenStream(train_lines[0], m3_tokenizer)
 
-    #tokenize data & put in tensor format
-    print("--- CONVERTING DATA TO TENSORS ---")
-    print("Can take a while based on dataset size...")
-    train_dataset = LDRTextDataset(train_lines, m3_tokenizer)
-    print("completed training dataset")
-    eval_dataset = LDRTextDataset(eval_lines, m3_tokenizer)
-    print("completed evaluation dataset")
-
     #loading model and data collator
-    print("\n--- LOADING GPT2 and Data Collator---")
+    print("--- LOADING GPT2 and Data Collator---")
     model = AutoModelForCausalLM.from_config(GPT2Config(
         vocab_size=m3_tokenizer.vocab_size,
         n_positions=m3_tokenizer.model_max_length,
     ))
     data_collator = DataCollatorForLanguageModeling(tokenizer=m3_tokenizer, mlm=False)
-    print("done")
+    print("Finished loading")
 
     #setting training variables and training model
-    print("\n--- TRAINING TRANSFORMER ---")
+    print("\n--- Initialisating Training Arguments ---")
     training_args = TrainingArguments(
         #paths
         output_dir=save_model_path,
         fp16=vlads_device,
 
         #learning variables
-        num_train_epochs=10,
+        num_train_epochs=7,
         learning_rate=5e-6, # original divided 2, data is 9 times larger
-        eval_steps=1000,    # 1 step = 10 samples, so every 10k samples
+        eval_steps=5000,    # ~every 40 minutes
 
-        #updates to weights occer every trainBatchSize * gradiatentAccumSteps = every 10 samples
+        #updates to weights occer every trainBatchSize * gradiatentAccumSteps = every 8 samples
         per_device_train_batch_size=2, #num samples simultaneously processed (in 1 batch)
-        gradient_accumulation_steps=5, #num batches before updating weights
+        gradient_accumulation_steps=4, #num batches before updating weights
         
         #non-variable args
         logging_steps=1000,
-        save_steps=10000,
+        save_steps=10000, 
         save_total_limit=1,
         push_to_hub=False,
         eval_strategy="steps",
@@ -257,12 +250,22 @@ def theMain(
     )
 
     #saving training args so we can see what we trained with
+    training_args_file = save_model_path / "trainArgs_v1-1.txt"
     if training_args_file.exists(): training_args_file.unlink()
-    training_args_file = save_model_path / "trainingArgs_M3_GPT2_v1-1.txt"
     with open(training_args_file, 'w') as f:
         for arg, value in vars(training_args).items():
             f.write(f"{arg}: {value}\n")
+    print(f"Saved training arguments to {training_args_file}")
 
+    #tokenize data & put in tensor format
+    print("\n--- CONVERTING DATA TO TENSORS ---")
+    print(f"Start: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}   ~9 minutes when augments=1")
+    train_dataset = LDRTextDataset(train_lines, m3_tokenizer)
+    print("completed training dataset")
+    eval_dataset = LDRTextDataset(eval_lines, m3_tokenizer)
+    print("completed evaluation dataset")
+
+    print("\n--- BEGINNING TRAINING ---")
     trainer = Trainer(
         model=model,
         args=training_args,
