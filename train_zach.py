@@ -23,6 +23,7 @@ from transformers import (
     TrainingArguments,
     Trainer,
     GPT2Config, 
+    EarlyStoppingCallback
     # GPTNeoConfig, 
 )
 
@@ -273,6 +274,7 @@ def theMain(
         data_collator=data_collator,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
+        callbacks=[EarlyStoppingCallback(early_stopping_patience=5)],
     )
     trainer.train()
     print("\n--- TRANSFORMER TRAINED ---")
