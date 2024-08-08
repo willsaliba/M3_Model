@@ -131,8 +131,8 @@ def process_file(file_lines, all_lines, num_augments_per_file, label_token, bric
             else: 
                 curr_window = processed_file_lines[j:]
                 curr_window.append(" <|EOS|>")
-            #if first window of sample, add the class label
-            if j == 0: curr_window.insert(0, label_token)
+            # Add the class label
+            curr_window.insert(0, label_token)
 
             #add curr window to all lines for training data
             all_lines.append(" ".join(curr_window))
