@@ -101,7 +101,6 @@ def process_file(file_lines, all_lines, num_augments_per_file, label_token, bric
             for j in range(2, 5):
                 coord = float(entries[j]) + translation[j-2]
                 entries[j] = str(round(coord))
-                print(entries[j])
             #converting rotation matrix to quaternions
             rot_matrix = [
                 [float(entries[5]), float(entries[6]), float(entries[7])],
@@ -125,14 +124,20 @@ def process_file(file_lines, all_lines, num_augments_per_file, label_token, bric
         #creating training windows
         for j in range(len(processed_file_lines)):
             curr_window = []
-            #if more then bricks_per_window bricks left get 100 brick window
+            
+            #if not first window & less then 8 bricks left stop
+            if j != 0 and len(processed_file_lines) - j < 8: break
+
+            #if more then bricks_per_window bricks left
             if j + bricks_per_window < len(processed_file_lines): 
                 curr_window = processed_file_lines[j:j+bricks_per_window] 
+
             #if less then bricks_per_window bricks left get remaining and add EOS token
             else: 
                 curr_window = processed_file_lines[j:]
                 curr_window.append(" <|EOS|>")
-            # Add the class label
+
+            # Add the class label to every window
             curr_window.insert(0, label_token)
 
             #add curr window to all lines for training data
@@ -229,8 +234,8 @@ def theMain(
         fp16=vlads_device,
 
         #learning variables
-        num_train_epochs=7,
-        learning_rate=5e-6, # original divided 2, data is 9 times larger
+        num_train_epochs=5,
+        learning_rate=1e-6, # original divided 10
         eval_steps=5000,    # ~every 40 minutes
 
         #updates to weights occer every trainBatchSize * gradiatentAccumSteps = every 8 samples
@@ -252,7 +257,7 @@ def theMain(
     )
 
     #saving training args so we can see what we trained with
-    training_args_file = save_model_path / "trainArgs_v1-1.txt"
+    training_args_file = save_model_path / "trainArgs_v1-2.txt"
     if training_args_file.exists(): training_args_file.unlink()
     with open(training_args_file, 'w') as f:
         for arg, value in vars(training_args).items():
@@ -278,7 +283,7 @@ def theMain(
     )
     trainer.train()
     print("\n--- TRANSFORMER TRAINED ---")
-    model.save_pretrained(Path(save_model_path, "M3_GPT2_v1-1"))
+    model.save_pretrained(Path(save_model_path, "M3_GPT2_v1-2"))
     print("\n--- TRAINED MODEL SAVED ---")
 
 #DEAR ZACH: this is my weird way of running the main function bc I was sick of the super long terminal error messages that would cut off
