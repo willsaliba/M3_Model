@@ -202,7 +202,7 @@ class LDRTextDataset(Dataset):
 
 def theMain(
     #high level
-    vlads_device: bool = False,
+    vlads_device: bool = True,
     num_augments_per_file: int = 1, 
     #paths
     train_data_path: Path = Path("data"),
@@ -210,7 +210,7 @@ def theMain(
     save_tokenizer_path: Path = Path("trained_tokenizer"),
 ):
     #load training data (each element = string of whole file)
-    train_lines = load_ldr_data(train_data_path / 'test', num_augments_per_file, is_eval_set=False)
+    train_lines = load_ldr_data(train_data_path / 'train', num_augments_per_file, is_eval_set=False)
     eval_lines = load_ldr_data(train_data_path / 'test', num_augments_per_file, is_eval_set=True)
 
     #load & train tokenizer
