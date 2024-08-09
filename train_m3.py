@@ -23,6 +23,7 @@ from transformers import (
     TrainingArguments,
     Trainer,
     GPT2Config, 
+    EarlyStoppingCallback
     # GPTNeoConfig, 
 )
 
@@ -96,10 +97,10 @@ def process_file(file_lines, all_lines, num_augments_per_file, label_token, bric
             entries = line.split()
             if len(entries) == 0: continue
             if entries[0] != '1': continue
-            #process translation for x, y, z and rounding to 3 decimal places (inds: 2-4)
+            # Round LDU x,y,z unit offset from origin to LDU integer unit
             for j in range(2, 5):
                 coord = float(entries[j]) + translation[j-2]
-                entries[j] = f"{coord:.3f}"
+                entries[j] = str(round(coord))
             #converting rotation matrix to quaternions
             rot_matrix = [
                 [float(entries[5]), float(entries[6]), float(entries[7])],
@@ -123,15 +124,21 @@ def process_file(file_lines, all_lines, num_augments_per_file, label_token, bric
         #creating training windows
         for j in range(len(processed_file_lines)):
             curr_window = []
-            #if more then bricks_per_window bricks left get 100 brick window
+            
+            #if not first window & less then 8 bricks left stop
+            if j != 0 and len(processed_file_lines) - j < 8: break
+
+            #if more then bricks_per_window bricks left
             if j + bricks_per_window < len(processed_file_lines): 
                 curr_window = processed_file_lines[j:j+bricks_per_window] 
+
             #if less then bricks_per_window bricks left get remaining and add EOS token
             else: 
                 curr_window = processed_file_lines[j:]
                 curr_window.append(" <|EOS|>")
-            #if first window of sample, add the class label
-            if j == 0: curr_window.insert(0, label_token)
+
+            # Add the class label to every window
+            curr_window.insert(0, label_token)
 
             #add curr window to all lines for training data
             all_lines.append(" ".join(curr_window))
@@ -195,7 +202,7 @@ class LDRTextDataset(Dataset):
 
 def theMain(
     #high level
-    vlads_device: bool = True,
+    vlads_device: bool = False,
     num_augments_per_file: int = 1, 
     #paths
     train_data_path: Path = Path("data"),
@@ -203,7 +210,7 @@ def theMain(
     save_tokenizer_path: Path = Path("trained_tokenizer"),
 ):
     #load training data (each element = string of whole file)
-    train_lines = load_ldr_data(train_data_path / 'train', num_augments_per_file, is_eval_set=False)
+    train_lines = load_ldr_data(train_data_path / 'test', num_augments_per_file, is_eval_set=False)
     eval_lines = load_ldr_data(train_data_path / 'test', num_augments_per_file, is_eval_set=True)
 
     #load & train tokenizer
@@ -227,8 +234,8 @@ def theMain(
         fp16=vlads_device,
 
         #learning variables
-        num_train_epochs=7,
-        learning_rate=5e-6, # original divided 2, data is 9 times larger
+        num_train_epochs=5,
+        learning_rate=1e-6, # original divided 10
         eval_steps=5000,    # ~every 40 minutes
 
         #updates to weights occer every trainBatchSize * gradiatentAccumSteps = every 8 samples
@@ -250,7 +257,7 @@ def theMain(
     )
 
     #saving training args so we can see what we trained with
-    training_args_file = save_model_path / "trainArgs_v1-1.txt"
+    training_args_file = save_model_path / "train_args.txt"
     if training_args_file.exists(): training_args_file.unlink()
     with open(training_args_file, 'w') as f:
         for arg, value in vars(training_args).items():
@@ -272,10 +279,11 @@ def theMain(
         data_collator=data_collator,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
+        callbacks=[EarlyStoppingCallback(early_stopping_patience=5)],
     )
     trainer.train()
     print("\n--- TRANSFORMER TRAINED ---")
-    model.save_pretrained(Path(save_model_path, "M3_GPT2_v1-1"))
+    model.save_pretrained(Path(save_model_path, "M3_GPT2_v1-2"))
     print("\n--- TRAINED MODEL SAVED ---")
 
 #DEAR ZACH: this is my weird way of running the main function bc I was sick of the super long terminal error messages that would cut off
