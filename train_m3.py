@@ -235,7 +235,7 @@ def theMain(
 
         #learning variables
         num_train_epochs=5,
-        learning_rate=1e-6, # original divided 10
+        learning_rate=3e-6, 
         eval_steps=5000,    # ~every 40 minutes
 
         #updates to weights occer every trainBatchSize * gradiatentAccumSteps = every 8 samples
