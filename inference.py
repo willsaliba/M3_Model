@@ -45,6 +45,42 @@ def decode_v1(output, tokenizer):
 
     return text
 
+def decode_v3(output, tokenizer):
+    tokens, ldr_lines, line, text = [], [], [], ""
+    
+    #creating lines
+    for token_id in output[0]: tokens.append(tokenizer.decode(token_id.unsqueeze(0), skip_special_tokens=False, clean_up_tokenization_spaces=False))
+    for token in tokens:
+        if token == "\n" or token[0] == "<":
+            line.append(token)
+            ldr_lines.append(line)
+            line = []
+        else: line.append(token)
+        
+    #formatting lines
+    for ldr_line in ldr_lines:
+        #class token
+        if ldr_line[0][0] == "<": 
+            text += ldr_line[0] + "\n"
+            continue
+
+        #normal brick line
+        for i in range(len(ldr_line)):
+            token = ldr_line[i]
+            next = '' if i == len(ldr_line)-1 else ldr_line[i+1]
+            #1_
+            if i == 0 and token == '1': text += '1' + " "
+            #colour_ 
+            elif i==1: text += token + ' '
+            #potential -
+            elif token == "-": text += "-"    
+            #(-)int(.000) or \n
+            elif (next != '' and next[0] == '.') or token=='\n': text += token
+            #.000 or .dat or x y z
+            else: text += token + " "
+
+    return text
+
 def valid_ldr(text):
     ldr = ""
     lines = text.split("\n")
@@ -152,20 +188,21 @@ def process_file(file_lines, all_lines, num_augments_per_file, label_token, bric
      
 def main(
     vlads_machine: bool = False,
-    trained_tokenizer_dir: Path = Path("trained_model/v1-1/m3"),
-    trained_model_dir: Path = Path("trained_model/v1-1/M3_GPT2"),
+    trained_tokenizer_dir: Path = Path('trained_model/v3/tokenizerv3'),
+    trained_model_dir: Path = Path('trained_model/v3/M3_V3'),
 ):
     
     #Loading tokenizer and model
     tokenizer = AutoTokenizer.from_pretrained(trained_tokenizer_dir)
-    print(f"\nTokenizer Loaded: {trained_tokenizer_dir.name}\n")
+    print(f"Tokenizer Loaded: {trained_tokenizer_dir.name}\n")
+    
     device = torch.device("cuda:0") if torch.cuda.is_available() else torch.device("cpu")
     if not vlads_machine and torch.backends.mps.is_available(): torch.device("mps")
     model = AutoModelForCausalLM.from_pretrained(trained_model_dir).to(device)
     print(f"Model Loaded: {trained_model_dir.name}\n")
 
     #PROMPT AND CONFIG
-    text_prompt = """<|CR|>"""
+    text_prompt = """<|BU|>"""
 
     #IF WANT TO PROMPT WITH BRICKS NEED TO ENSURE THEY ARE IN SAME FORMAT AS WHEN TRAINING
     # test_assemblies = load_ldr_data(Path("data/test"), 1, True)
@@ -175,7 +212,7 @@ def main(
     prompt = torch.as_tensor([tokenizer.encode(text_prompt)]).to(device)
     generation_config = GenerationConfig(
         max_length=model.config.n_positions,
-        max_new_tokens=1500, #(2048 - len(prompt_tokens)),
+        max_new_tokens=1000, #(2048 - len(prompt_tokens)),
         do_sample=True,
         top_k=51,
         top_p=0.85,
@@ -187,13 +224,15 @@ def main(
     out = model.generate(prompt, generation_config=generation_config)
     
     #PRINTING OUTPUT 
-    print("\nTokens:")
+    print("\nRaw Tokens:")
     for token_id in out[0]:
         decoded_token = tokenizer.decode(token_id.unsqueeze(0), skip_special_tokens=False, clean_up_tokenization_spaces=False)
         if decoded_token[0] == "<": print(f"{decoded_token}\n")
         elif decoded_token == "\n": print("\\n")
         else: print(f"{decoded_token} |", end="")   
-    formatted_output = decode_v1(out, tokenizer)
+    
+    #decoding tokens
+    formatted_output = decode_v3(out, tokenizer)    
 
     #CONVERTING TO VALID LDR
     print("\nFINAL LDR:")
