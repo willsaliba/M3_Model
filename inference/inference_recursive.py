@@ -3,46 +3,7 @@ import torch
 from transformers import AutoModelForCausalLM, GenerationConfig, AutoTokenizer
 import typer
 from scipy.spatial.transform import Rotation
-
-def decode_v1(output, tokenizer):
-    tokens, ldr_lines, line, text = [], [], [], ""
-    
-    # Creating lines
-    for token_id in output: 
-        tokens.append(tokenizer.decode(token_id.unsqueeze(0), skip_special_tokens=False, clean_up_tokenization_spaces=False))
-    for token in tokens:
-        if token == "\n" or token[0] == "<":
-            line.append(token)
-            ldr_lines.append(line)
-            line = []
-        else: 
-            line.append(token)
-        
-    # Formatting lines
-    for ldr_line in ldr_lines:
-        # Class token
-        if ldr_line[0][0] == "<": 
-            text += ldr_line[0] + "\n"
-            continue
-
-        # Normal brick line
-        for i in range(len(ldr_line)):
-            token = ldr_line[i]
-            next = "" if i != len(ldr_line) else ldr_line[i+1]
-            # 1_
-            if i == 0 and ldr_line[i] == '1': text += '1' + " "
-            # Colour_
-            elif i == 1: text += token + " "
-            # Potential -
-            elif ldr_line[i] == "-": text += "-"    
-            # (-)int(.000)
-            elif '.' in next: text += token
-            # .000 or .dat
-            elif '.' in token: text += token + " "
-            # \n
-            else: text += token   
-
-    return text
+from inference.inference import decode_v1, decode_v3
 
 def valid_ldr(text):
     ldr = ""
