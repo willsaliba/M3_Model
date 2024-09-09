@@ -1,3 +1,5 @@
+import os
+import glob
 import math
 
 def read_ldr_file(file_path):
@@ -67,6 +69,36 @@ def write_ldr_file(file_path, ldr_lines):
     """
     with open(file_path, 'w') as file:
         file.writelines(ldr_lines)
+def process_directory(input_directory, sorted_output_directory):
+    """
+    Processes all LDR files in the input directory, sorts the bricks by the closest distance,
+    and writes the output to the sorted output directory.
+    """
+    # Create output directory if it doesn't exist
+    os.makedirs(sorted_output_directory, exist_ok=True)
+    
+    # Find all .ldr files in the input directory
+    ldr_files = glob.glob(os.path.join(input_directory, '*.ldr'))
+    
+    for ldr_file in ldr_files:
+        # Read the original LDR file
+        ldr_lines = read_ldr_file(ldr_file)
+        
+        # Sort bricks by the closest distance
+        sorted_ldr_lines = sort_bricks_by_closest(ldr_lines)
+        
+        # Prepare output file path
+        base_filename = os.path.basename(ldr_file)
+        sorted_output_file_path = os.path.join(sorted_output_directory, f"sorted_{base_filename}")
+        
+        # Write the sorted LDR lines to a new file
+        write_ldr_file(sorted_output_file_path, sorted_ldr_lines)
+        print(f"Sorted LDR file saved to {sorted_output_file_path}")
+
+# Example usage:
+input_directory = 'ldr_files'  # Replace with your input directory containing LDR files
+sorted_output_directory = 'sorted_output'  # Directory to save sorted LDR files
+process_directory(input_directory, sorted_output_directory)
 
 # Main function to process the LDR file
 def main(input_file_path, sorted_output_file_path):
@@ -81,6 +113,6 @@ def main(input_file_path, sorted_output_file_path):
     print(f"Sorted LDR file saved to {sorted_output_file_path}")
 
 # Example usage:
-input_file = 'building17.ldr'  # Replace with your input LDR file path
-sorted_output_file = 'sorted_example.ldr'  # Output file path for sorted bricks
-main(input_file, sorted_output_file)
+input_directory = 'data/test'  # Replace with your input directory containing LDR files
+sorted_output_directory = 'sorted_output'  # Directory to save sorted LDR files
+process_directory(input_directory, sorted_output_directory)
