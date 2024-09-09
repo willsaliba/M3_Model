@@ -1,3 +1,6 @@
+import os
+import glob
+
 def read_ldr_file(file_path):
     """
     Reads an LDR file and returns its lines.
@@ -75,27 +78,33 @@ def write_ldr_file(file_path, ldr_lines):
     with open(file_path, 'w') as file:
         file.writelines(ldr_lines)
 
-# Main function to process the LDR file
-def main(input_file_path, relative_output_file_path, absolute_output_file_path):
-    # Read the original LDR file
-    ldr_lines = read_ldr_file(input_file_path)
+def process_directory(input_directory, relative_output_directory):
+    """
+    Processes all LDR files in the input directory, converts them to relative and absolute
+    coordinate versions, and writes the output to the respective directories.
+    """
+    # Create output directories if they don't exist
+    os.makedirs(relative_output_directory, exist_ok=True)
     
-    # Convert to relative coordinates
-    relative_ldr_lines = convert_to_relative_coordinates(ldr_lines)
+    # Find all .ldr files in the input directory
+    ldr_files = glob.glob(os.path.join(input_directory, '*.ldr'))
     
-    # Write the modified LDR lines to a new file with relative coordinates
-    write_ldr_file(relative_output_file_path, relative_ldr_lines)
-    print(f"Converted LDR file with relative coordinates saved to {relative_output_file_path}")
-    
-    # Convert back to absolute coordinates
-    absolute_ldr_lines = convert_to_absolute_coordinates(relative_ldr_lines)
-    
-    # Write the modified LDR lines to a new file with absolute coordinates
-    write_ldr_file(absolute_output_file_path, absolute_ldr_lines)
-    print(f"Converted LDR file back to absolute coordinates saved to {absolute_output_file_path}")
+    for ldr_file in ldr_files:
+        # Read the original LDR file
+        ldr_lines = read_ldr_file(ldr_file)
+        
+        # Convert to relative coordinates
+        relative_ldr_lines = convert_to_relative_coordinates(ldr_lines)
+        
+        # Prepare output file paths
+        base_filename = os.path.basename(ldr_file)
+        relative_output_file_path = os.path.join(relative_output_directory, f"relative_{base_filename}")
+        
+        # Write the modified LDR lines to a new file with relative coordinates
+        write_ldr_file(relative_output_file_path, relative_ldr_lines)
+        print(f"Converted LDR file with relative coordinates saved to {relative_output_file_path}")
 
-# Example usage:
-input_file = 'building17.ldr'  # Replace with your input LDR file path
-relative_output_file = 'relative_example.ldr'  # Output file path for relative coordinates
-absolute_output_file = 'absolute_example.ldr'  # Output file path for absolute coordinates
-main(input_file, relative_output_file, absolute_output_file)
+
+input_directory = 'data/test'  # Replace with input directory containing LDR files
+relative_output_directory = 'relative_output'  # Directory to save relative coordinate files
+process_directory(input_directory, relative_output_directory)
