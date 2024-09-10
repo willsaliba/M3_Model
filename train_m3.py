@@ -283,7 +283,7 @@ def theMain(
     )
     trainer.train()
     print("\n--- TRANSFORMER TRAINED ---")
-    model.save_pretrained(Path(save_model_path, "M3_GPT2_v1-2"))
+    model.save_pretrained(Path(save_model_path, "final"))
     print("\n--- TRAINED MODEL SAVED ---")
 
 #DEAR ZACH: this is my weird way of running the main function bc I was sick of the super long terminal error messages that would cut off
