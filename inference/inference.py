@@ -188,8 +188,8 @@ def process_file(file_lines, all_lines, num_augments_per_file, label_token, bric
      
 def main(
     vlads_machine: bool = False,
-    trained_tokenizer_dir: Path = Path('trained_model/v3/tokenizerv3'),
-    trained_model_dir: Path = Path('trained_model/v3/M3_V3'),
+    trained_tokenizer_dir: Path = Path('tokenizers/tokenizerv3'),
+    trained_model_dir: Path = Path('models/modelv3/final_model'),
 ):
     
     #Loading tokenizer and model
@@ -202,7 +202,7 @@ def main(
     print(f"Model Loaded: {trained_model_dir.name}\n")
 
     #PROMPT AND CONFIG
-    text_prompt = """<|BU|>"""
+    text_prompt = """<|VE|>"""
 
     #IF WANT TO PROMPT WITH BRICKS NEED TO ENSURE THEY ARE IN SAME FORMAT AS WHEN TRAINING
     # test_assemblies = load_ldr_data(Path("data/test"), 1, True)
@@ -214,8 +214,8 @@ def main(
         max_length=model.config.n_positions,
         max_new_tokens=1000, #(2048 - len(prompt_tokens)),
         do_sample=True,
-        top_k=51,
-        top_p=0.85,
+        top_k=5,# Can mess around with this
+        top_p=0.8,# Can mess around with this
         repetition_penalty=1.1,
         eos_token_id=tokenizer.eos_token_id,
         pad_token_id=tokenizer.pad_token_id,
