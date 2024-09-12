@@ -23,13 +23,55 @@ from transformers import (
     TrainingArguments,
     Trainer,
     GPT2Config, 
-    EarlyStoppingCallback
+    EarlyStoppingCallback,
+    GPT2LMHeadModel
     # GPTNeoConfig, 
 )
 
 #environemnt variables
 os.system('clear')
 os.environ["TOKENIZERS_PARALLELISM"] = "true"
+
+
+class LabelConditionedGPT2(GPT2LMHeadModel):
+    def __init__(self, config, num_labels):
+        super().__init__(config)
+        
+        # Define a new embedding layer for labels
+        self.label_embedding = torch.nn.Embedding(num_labels, config.hidden_size)
+        
+        # Initialize label embeddings
+        torch.nn.init.normal_(self.label_embedding.weight, mean=0, std=config.initializer_range)
+    
+    def forward(self, input_ids, attention_mask=None, labels=None, label_ids=None):
+        # Get label embeddings
+        if label_ids is not None:
+            label_embeds = self.label_embedding(label_ids)  # Shape: (batch_size, hidden_size)
+            # Expand label embeddings to match input length
+            label_embeds = label_embeds.unsqueeze(1).expand(-1, input_ids.size(1), -1)  # Shape: (batch_size, seq_len, hidden_size)
+        else:
+            label_embeds = 0  # If no label, set label embedding to zero
+        
+        # Get text embeddings
+        text_outputs = self.transformer(input_ids, attention_mask=attention_mask)
+        text_embeds = text_outputs.last_hidden_state  # Shape: (batch_size, seq_len, hidden_size)
+        
+        # Combine label and text embeddings (simple addition here)
+        combined_embeds = text_embeds + label_embeds
+        
+        # Pass combined embeddings through the language model head
+        lm_logits = self.lm_head(combined_embeds)
+        
+        loss = None
+        if labels is not None:
+            # Shift so that tokens < n predict n
+            shift_logits = lm_logits[..., :-1, :].contiguous()
+            shift_labels = labels[..., 1:].contiguous()
+            # Flatten the tokens
+            loss_fct = torch.nn.CrossEntropyLoss()
+            loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
+        
+        return {'loss': loss, 'logits': lm_logits} if loss is not None else {'logits': lm_logits}
 
 def printTokenStream(text, m3):
     print("---Sample Train Line and Tokens---\n")
@@ -195,34 +237,60 @@ def load_tokenizer(vocab_size, train_lines, save_path, max_context_window=2048):
     return M3
 
 class LDRTextDataset(Dataset):
-    def __init__(self, data, tokenizer):
+    def __init__(self, data, tokenizer, label_map):
+        """
+        Initialize the LDRTextDataset.
+
+        Args:
+        - data: List of (text, label) tuples.
+        - tokenizer: The tokenizer to use for encoding the data.
+        - label_map: Dictionary mapping label names to label IDs.
+        """
         self.data = data
         self.tokenizer = tokenizer
+        self.label_map = label_map  # Mapping from label name to label ID
     
     def __len__(self):
         return len(self.data)
     
     def __getitem__(self, idx):
-        text, label = self.data[idx]  # Assuming data is a list of (text, label) tuples
+        """
+        Get the tokenized representation of a data sample.
 
-        # Combine text and label (if needed) or just tokenize the text
-        inputs = self.tokenizer(
-            f"<|{label}|> {text}",  # Include label in the input text
+        Args:
+        - idx: Index of the sample to retrieve.
+
+        Returns:
+        - A dictionary containing 'input_ids', 'attention_mask', 'labels', and 'label_ids'.
+        """
+        text, label = self.data[idx]  # Assuming data is a list of (text, label) tuples
+        
+        # Tokenize the text
+        text_inputs = self.tokenizer(
+            text,
             truncation=True,
             padding="max_length",
             max_length=self.tokenizer.model_max_length,
             return_tensors="pt",
         )
+
+        # Convert the label to an ID using the label_map
+        label_id = torch.tensor(self.label_map[label], dtype=torch.long)
         
-        # Return input tensors
-        return {'input_ids': inputs['input_ids'].squeeze(), 'attention_mask': inputs['attention_mask'].squeeze()}
+        # Return input tensors separately for text and label
+        return {
+            'input_ids': text_inputs['input_ids'].squeeze(),
+            'attention_mask': text_inputs['attention_mask'].squeeze(),
+            'labels': text_inputs['input_ids'].squeeze(),  # The labels for causal language modeling are the input_ids
+            'label_ids': label_id  # Label ID to pass to label embedding
+        }
 
 
 def theMain(
-    #high level
+    # High-level
     vlads_device: bool = False,
     num_augments_per_file: int = 1, 
-    #paths
+    # Paths
     train_data_path: Path = Path("data"),
     save_model_path: Path = Path("trained_model"),
     save_tokenizer_path: Path = Path("trained_tokenizer"),
@@ -238,14 +306,19 @@ def theMain(
     m3_tokenizer = load_tokenizer(int(52000), train_texts, save_tokenizer_path)
     printTokenStream(train_texts[0], m3_tokenizer)  # Example tokenization of the first training sample
 
-    # Load model and data collator
-    print("--- LOADING GPT2 and Data Collator---")
-    model = AutoModelForCausalLM.from_config(GPT2Config(
+    # Create a label map (Mapping from label names to unique IDs)
+    unique_labels = list(set(label for _, label in train_lines))
+    label_map = {label: idx for idx, label in enumerate(unique_labels)}
+
+    # Load custom LabelConditionedGPT2 model
+    print("--- LOADING LabelConditionedGPT2 and Data Collator---")
+    config = GPT2Config(
         vocab_size=m3_tokenizer.vocab_size,
         n_positions=m3_tokenizer.model_max_length,
-    ))
+    )
+    model = LabelConditionedGPT2(config, num_labels=len(label_map))  # Pass the number of labels
 
-    # Using standard data collator
+    # Using standard data collator (optionally, you can define a custom data collator)
     data_collator = DataCollatorForLanguageModeling(tokenizer=m3_tokenizer, mlm=False)
     print("Finished loading")
 
@@ -283,9 +356,9 @@ def theMain(
     # Tokenize data & put it in tensor format
     print("\n--- CONVERTING DATA TO TENSORS ---")
     print(f"Start: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}   ~9 minutes when augments=1")
-    train_dataset = LDRTextDataset(train_lines, m3_tokenizer)
+    train_dataset = LDRTextDataset(train_lines, m3_tokenizer, label_map)
     print("Completed training dataset")
-    eval_dataset = LDRTextDataset(eval_lines, m3_tokenizer)
+    eval_dataset = LDRTextDataset(eval_lines, m3_tokenizer, label_map)
     print("Completed evaluation dataset")
 
     print("\n--- BEGINNING TRAINING ---")
